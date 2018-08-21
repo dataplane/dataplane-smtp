@@ -1,0 +1,69 @@
+--- postfix-3.3.1/src/smtpstone/smtp-sink.c	2016-02-13 19:07:52.000000000 -0600
++++ postfix-3.3.1/dataplane/smtp-sink.c	2018-08-21 06:52:30.604816442 -0500
+@@ -319,6 +319,8 @@ typedef struct SINK_STATE {
+     char   *push_back_ptr;
+     /* Capture file information for fake Received: header */
+     MAI_HOSTADDR_STR client_addr;	/* IP address */
++    MAI_HOSTADDR_STR server_addr;	/* IP address */
++    MAI_SERVPORT_STR client_port;	/* TCP port */
+     char   *addr_prefix;		/* ipv6: or empty */
+     char   *helo_args;			/* text after HELO or EHLO */
+     const char *client_proto;		/* SMTP, ESMTP, LMTP */
+@@ -1099,7 +1101,9 @@ static int command_resp(SINK_STATE *stat
+ {
+     /* We use raw syslog. Sanitize data content and length. */
+     if (cmdp->flags & FLAG_SYSLOG)
+-	syslog(LOG_INFO, "%s %.100s", command, args);
++	syslog(LOG_INFO, "saddr %s; sport %s; daddr %s; %s %.100s",
++	    state->client_addr.buf, state->client_port.buf,
++	    state->server_addr.buf, command, args);
+     if (cmdp->flags & FLAG_DISCONNECT)
+ 	return (-1);
+     if (cmdp->flags & FLAG_CLOSE) {
+@@ -1340,8 +1344,11 @@ static void disconnect(SINK_STATE *state
+ static void connect_event(int unused_event, void *unused_context)
+ {
+     struct sockaddr_storage ss;
++    struct sockaddr_storage server_ss;
+     SOCKADDR_SIZE len = sizeof(ss);
++    SOCKADDR_SIZE server_len = sizeof(server_ss);
+     struct sockaddr *sa = (struct sockaddr *) &ss;
++    struct sockaddr *server_sa = (struct sockaddr *) &server_ss;
+     SINK_STATE *state;
+     int     fd;
+ 
+@@ -1350,13 +1357,20 @@ static void connect_event(int unused_eve
+ 	if (++client_count == max_client_count)
+ 	    event_disable_readwrite(sock);
+ 	state = (SINK_STATE *) mymalloc(sizeof(*state));
++    if (getsockname(fd, server_sa, &server_len) == 0)
++	    SOCKADDR_TO_HOSTADDR(server_sa, server_len, &state->server_addr,
++                (MAI_SERVPORT_STR *) 0, server_sa->sa_family);
++    else
++	    state->server_addr.buf[0] = 0;
+ 	if (strchr((char *) proto_info->sa_family_list, sa->sa_family))
+ 	    SOCKADDR_TO_HOSTADDR(sa, len, &state->client_addr,
+-				 (MAI_SERVPORT_STR *) 0, sa->sa_family);
+-	else
++				 &state->client_port, sa->sa_family);
++	else {
+ 	    strncpy(state->client_addr.buf, "local", sizeof("local"));
++	    strncpy(state->client_port.buf, "0", sizeof("0"));
++    }
+ 	if (msg_verbose)
+-	    msg_info("connect (%s %s)",
++	    msg_info("connect (%s %s:%s %s)",
+ #ifdef AF_LOCAL
+ 		     sa->sa_family == AF_LOCAL ? "AF_LOCAL" :
+ #else
+@@ -1367,7 +1381,9 @@ static void connect_event(int unused_eve
+ 		     sa->sa_family == AF_INET6 ? "AF_INET6" :
+ #endif
+ 		     "unknown protocol family",
+-		     state->client_addr.buf);
++		     state->client_addr.buf,
++		     state->client_port.buf,
++		     state->server_addr.buf);
+ 	non_blocking(fd, NON_BLOCKING);
+ 	state->stream = vstream_fdopen(fd, O_RDWR);
+ 	vstream_tweak_sock(state->stream);
