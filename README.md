@@ -16,5 +16,5 @@ patch -p1 -d postfix-x.y.z/ < postfix-x.y.z.dataplane.patch
 to create a patch:
 
 ```
-diff -rupN postfix-x.y.z/ postfix-x.y.z.dataplane/postfix-x.y.z.dataplane.patch
+diff -rupN postfix-x.y.z/ postfix-x.y.z.dataplane > postfix-x.y.z.dataplane.patch
 ```
